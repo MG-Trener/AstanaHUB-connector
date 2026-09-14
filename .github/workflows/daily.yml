@@ -2,8 +2,20 @@ name: Astana Hub daily reward
 
 on:
   schedule:
-    # GitHub cron uses UTC. 18:00 UTC = 23:00 in Asia/Qyzylorda (UTC+5).
-    - cron: "0 18 * * *"
+    # UTC+5: one deterministic pseudo-random 20-minute slot from 06:00 to 10:00.
+    - cron: "0 1 * * *"
+    - cron: "20 1 * * *"
+    - cron: "40 1 * * *"
+    - cron: "0 2 * * *"
+    - cron: "20 2 * * *"
+    - cron: "40 2 * * *"
+    - cron: "0 3 * * *"
+    - cron: "20 3 * * *"
+    - cron: "40 3 * * *"
+    - cron: "0 4 * * *"
+    - cron: "20 4 * * *"
+    - cron: "40 4 * * *"
+    - cron: "0 5 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -18,23 +30,56 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Select today's random slot
+        id: gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          slots=(
+            "0 1 * * *" "20 1 * * *" "40 1 * * *"
+            "0 2 * * *" "20 2 * * *" "40 2 * * *"
+            "0 3 * * *" "20 3 * * *" "40 3 * * *"
+            "0 4 * * *" "20 4 * * *" "40 4 * * *"
+            "0 5 * * *"
+          )
+          target=$(python -c "import hashlib,datetime,os; value=f'{datetime.datetime.now(datetime.UTC):%Y-%m-%d}-{os.environ[\"REPOSITORY\"]}'; print(int(hashlib.sha256(value.encode()).hexdigest(),16)%13)")
+          selected="${slots[$target]}"
+          if [[ "$EVENT_SCHEDULE" == "$selected" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Selected daily slot: $selected UTC"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping; today's selected slot is $selected UTC"
+          fi
+
       - name: Checkout
+        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v6
 
       - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
         run: |
           python -m pip install --requirement requirements.txt
           python -m playwright install --with-deps chromium
 
       - name: Sign in and claim reward
+        if: steps.gate.outputs.run == 'true'
         env:
           ASTANAHUB_EMAIL: ${{ secrets.ASTANAHUB_EMAIL }}
           ASTANAHUB_PASSWORD: ${{ secrets.ASTANAHUB_PASSWORD }}
         run: python main.py
-
