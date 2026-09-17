@@ -63,6 +63,12 @@ def reward_due(now: datetime | None = None, logs_dir: Path | None = None) -> boo
     return current >= last_claim + REWARD_INTERVAL
 
 
+def run_daily_visit(email: str, password: str) -> str:
+    from astanahub_connector.github_login import run_daily_visit as browser_run_daily_visit
+
+    return browser_run_daily_visit(email, password)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
@@ -78,8 +84,6 @@ def main() -> int:
     if not email or not password:
         logging.error("Добавьте GitHub Secrets ASTANAHUB_EMAIL и ASTANAHUB_PASSWORD")
         return 2
-
-    from astanahub_connector.github_login import run_daily_visit
 
     try:
         result = run_daily_visit(email, password)
