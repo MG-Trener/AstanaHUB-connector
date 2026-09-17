@@ -2,9 +2,9 @@ name: Astana Hub daily reward
 
 on:
   schedule:
-    # Lightweight eligibility check every five minutes.
+    # Lightweight eligibility check every five minutes, offset from the top of the hour.
     # Browser login starts only after 24 hours from the last successful reward claim.
-    - cron: "*/5 * * * *"
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
   workflow_dispatch:
 
 concurrency:
