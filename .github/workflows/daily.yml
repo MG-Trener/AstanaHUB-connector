@@ -1,6 +1,12 @@
 name: Astana Hub daily reward
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/daily.yml"
+      - "main.py"
   schedule:
     # Lightweight eligibility check every five minutes, offset from the top of the hour.
     # Browser login starts only after 24 hours from the last successful reward claim.
