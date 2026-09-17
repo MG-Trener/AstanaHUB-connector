@@ -79,6 +79,12 @@ def main() -> int:
             logging.info("24 часа после награды ещё не прошли. Следующая попытка не раньше %s", next_attempt.isoformat())
         return 0
 
+    last_claim = last_reward_time()
+    if last_claim:
+        logging.info("24 часа после награды прошли; запускаю авторизацию. Последняя награда: %s", last_claim.isoformat())
+    else:
+        logging.info("Успешная награда в журнале не найдена; запускаю авторизацию")
+
     email = os.environ.get("ASTANAHUB_EMAIL", "").strip()
     password = os.environ.get("ASTANAHUB_PASSWORD", "")
     if not email or not password:
