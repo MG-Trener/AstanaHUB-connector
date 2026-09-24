@@ -104,15 +104,11 @@ def _remaining(quest: dict[str, Any]) -> int:
 
 def _read_blog(page: Page, blog: dict[str, Any]) -> None:
     page.goto(str(blog["absolute_url"]), wait_until="domcontentloaded", timeout=120_000)
-    content = page.locator(".blog-content").first
-    content.wait_for(state="visible", timeout=30_000)
-    content.scroll_into_view_if_needed()
+    page.locator("body").wait_for(state="visible", timeout=30_000)
     page.evaluate(
         """() => {
-            const el = document.querySelector('.blog-content');
-            if (!el) return;
-            el.scrollTop = el.scrollHeight;
-            el.dispatchEvent(new Event('scroll', {bubbles: true}));
+            window.scrollTo({top: document.documentElement.scrollHeight, behavior: 'instant'});
+            window.dispatchEvent(new Event('scroll'));
         }"""
     )
     page.wait_for_timeout(21_000)
