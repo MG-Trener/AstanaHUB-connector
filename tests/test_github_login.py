@@ -17,11 +17,23 @@ class MainTests(unittest.TestCase):
     def test_runner_receives_secrets_when_due(self) -> None:
         with patch("main.reward_due", return_value=True):
             with patch.dict(os.environ, {"ASTANAHUB_EMAIL": "user@example.com", "ASTANAHUB_PASSWORD": "secret"}, clear=True):
-                with patch("main.run_daily_visit", return_value="ok") as run:
+                with patch(
+                    "main.run_daily_visit",
+                    return_value=("ежедневная награда получена", "Прочитайте 3 поста: 3/3"),
+                ) as run:
                     with patch("main.write_monthly_log") as write_log:
                         self.assertEqual(main.main(), 0)
-                        run.assert_called_once_with("user@example.com", "secret")
-                        write_log.assert_called_once_with("успешно", "не доступна")
+                        run.assert_called_once_with(
+                            "user@example.com",
+                            "secret",
+                            claim_reward=True,
+                            run_quests=True,
+                        )
+                        write_log.assert_called_once_with(
+                            "успешно",
+                            "получена",
+                            "Прочитайте 3 поста: 3/3",
+                        )
 
     def test_runner_is_skipped_before_24_hours(self) -> None:
         with patch("main.reward_due", return_value=False):
@@ -66,12 +78,22 @@ class MainTests(unittest.TestCase):
         zone = timezone(timedelta(hours=5))
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(main, "LOGS_DIR", Path(directory)):
-                september = main.write_monthly_log("успешно", "получена", datetime(2026, 9, 30, 18, 40, tzinfo=zone))
-                october = main.write_monthly_log("успешно", "не доступна", datetime(2026, 10, 1, 6, 40, tzinfo=zone))
+                september = main.write_monthly_log(
+                    "успешно",
+                    "получена",
+                    "Прочитайте 3 поста: 3/3",
+                    now=datetime(2026, 9, 30, 18, 40, tzinfo=zone),
+                )
+                october = main.write_monthly_log(
+                    "успешно",
+                    "не доступна",
+                    now=datetime(2026, 10, 1, 6, 40, tzinfo=zone),
+                )
 
             self.assertEqual(september.name, "2026-09.log")
             self.assertEqual(october.name, "2026-10.log")
             self.assertIn("Награда: получена", september.read_text(encoding="utf-8"))
+            self.assertIn("Квесты: Прочитайте 3 поста: 3/3", september.read_text(encoding="utf-8"))
             self.assertIn("Награда: не доступна", october.read_text(encoding="utf-8"))
 
 

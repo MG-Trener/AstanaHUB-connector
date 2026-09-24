@@ -5,6 +5,8 @@ from typing import Any
 
 from playwright.sync_api import Page, sync_playwright
 
+from astanahub_connector.quests import run_active_community_quests
+
 LOGIN_URL = "https://astanahub.com/ru/s/auth/login/"
 ACCOUNT_URL = "https://astanahub.com/account/v2/main/"
 API_BASE = "/s/auth/api/v1"
@@ -86,15 +88,32 @@ def _claim_reward(page: Page) -> str:
     return "ежедневная награда получена"
 
 
-def run_daily_visit(email: str, password: str) -> str:
+def run_daily_visit(
+    email: str,
+    password: str,
+    *,
+    claim_reward: bool = True,
+    run_quests: bool = True,
+) -> tuple[str, str | None]:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(locale="ru-RU", timezone_id="Asia/Qyzylorda")
         try:
             page = context.new_page()
             _login(page, email, password)
-            return _claim_reward(page)
+            reward = (
+                _claim_reward(page)
+                if claim_reward
+                else "ежедневная награда не проверялась"
+            )
+            quests = None
+            if run_quests:
+                try:
+                    quests = run_active_community_quests(page)
+                except Exception as exc:
+                    LOGGER.exception("Проверка квестов завершилась ошибкой")
+                    quests = f"ошибка {type(exc).__name__}"
+            return reward, quests
         finally:
             context.close()
             browser.close()
-

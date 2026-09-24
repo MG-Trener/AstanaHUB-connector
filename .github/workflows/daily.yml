@@ -7,11 +7,18 @@ on:
     paths:
       - ".github/workflows/daily.yml"
       - "main.py"
+      - "astanahub_connector/**"
   schedule:
     # Lightweight eligibility check every five minutes, offset from the top of the hour.
     # Browser login starts only after 24 hours from the last successful reward claim.
     - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run browser now, ignoring the 24-hour reward timer"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: astanahub-daily-reward
@@ -36,8 +43,13 @@ jobs:
       - name: Check whether reward is due
         id: due
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_RUN: ${{ inputs.force }}
         run: |
-          if [ "$(python main.py --check-due)" = "due" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$FORCE_RUN" = "true" ]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+          elif [ "$(python main.py --check-due)" = "due" ]; then
             echo "due=true" >> "$GITHUB_OUTPUT"
           else
             echo "due=false" >> "$GITHUB_OUTPUT"
@@ -56,6 +68,7 @@ jobs:
         env:
           ASTANAHUB_EMAIL: ${{ secrets.ASTANAHUB_EMAIL }}
           ASTANAHUB_PASSWORD: ${{ secrets.ASTANAHUB_PASSWORD }}
+          FORCE_RUN: ${{ inputs.force }}
         run: python main.py
 
       - name: Save monthly log
