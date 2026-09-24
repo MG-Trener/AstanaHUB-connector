@@ -10,6 +10,7 @@ from playwright.sync_api import Page, sync_playwright
 from astanahub_connector.github_login import ACCOUNT_URL, _login
 
 HOME_URL = "https://astanahub.com/ru/"
+COMMUNITY_URL = "https://astanahub.com/ru/community/"
 OUTPUT_PATH = Path("quest-inspection.json")
 KEYWORDS = ("квест", "прочитать", "пост", "лайк", "коммент", "quest", "read", "like", "comment")
 
@@ -77,7 +78,26 @@ def main() -> int:
             )
             _login(page, email, password)
 
-            for url in (ACCOUNT_URL, HOME_URL):
+            api_data = page.evaluate(
+                """async () => {
+                    const urls = {
+                        quests: '/s/games/api/quests/',
+                        daily_contribution: '/s/games/api/daily_contribution/info/',
+                        latest_blogs: '/community/api/blog/?page=1&page_size=5&feed=true&order_by=-publish_date'
+                    };
+                    const result = {};
+                    for (const [name, url] of Object.entries(urls)) {
+                        const response = await fetch(url, {credentials: 'include'});
+                        result[name] = {
+                            status: response.status,
+                            body: await response.json().catch(() => null)
+                        };
+                    }
+                    return result;
+                }"""
+            )
+
+            for url in (ACCOUNT_URL, COMMUNITY_URL):
                 page.goto(url, wait_until="domcontentloaded", timeout=120_000)
                 page.wait_for_timeout(3000)
                 pages.append(scan_page(page))
@@ -96,7 +116,11 @@ def main() -> int:
                 page.wait_for_timeout(2500)
                 pages.append(scan_page(page))
 
-            result = {"pages": pages, "response_urls": sorted(response_urls)}
+            result = {
+                "api_data": api_data,
+                "pages": pages,
+                "response_urls": sorted(response_urls),
+            }
             OUTPUT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"Quest inspection saved: {len(pages)} pages")
             return 0
