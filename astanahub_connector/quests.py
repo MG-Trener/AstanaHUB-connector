@@ -262,10 +262,24 @@ def run_active_community_quests(page: Page) -> str:
                 if not current_user_id:
                     summaries.append(f"{title}: не удалось определить пользователя")
                     continue
+                attempted_comment = False
                 for blog in blogs:
                     if needed <= 0:
                         break
-                    if _comment_blog(page, blog, current_user_id):
+                    if attempted_comment:
+                        page.wait_for_timeout(10_000)
+                    try:
+                        posted = _comment_blog(page, blog, current_user_id)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "Комментарий к посту %s отклонён (%s); пробую следующий пост",
+                            blog.get("id"),
+                            type(exc).__name__,
+                        )
+                        attempted_comment = True
+                        continue
+                    attempted_comment = True
+                    if posted:
                         needed -= 1
 
             summaries.append(f"{title}: {_claim_if_completed(page, quest_id)}")
