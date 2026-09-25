@@ -1,6 +1,6 @@
 import unittest
 
-from astanahub_connector.quests import build_comment, quest_kind
+from astanahub_connector.quests import _localized_text, build_comment, quest_kind
 
 
 class QuestTests(unittest.TestCase):
@@ -14,9 +14,13 @@ class QuestTests(unittest.TestCase):
             "like",
         )
         self.assertEqual(
-            quest_kind({"title": {"ru": "Прокомментируйте пост"}, "module": ["blog"]}),
+            quest_kind({"title": {"ru": "Прокомментируйте 3 поста"}, "module": ["blog"]}),
             "comment",
         )
+
+    def test_extracts_localized_and_plain_text(self) -> None:
+        self.assertEqual(_localized_text({"ru": "Заголовок", "en": "Title"}), "Заголовок")
+        self.assertEqual(_localized_text("Заголовок"), "Заголовок")
 
     def test_ignores_unrelated_quests(self) -> None:
         self.assertIsNone(

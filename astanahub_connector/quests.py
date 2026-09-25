@@ -2,12 +2,23 @@ from __future__ import annotations
 
 import logging
 import re
+from html import unescape
 from typing import Any
 
 from playwright.sync_api import Page
 
 COMMUNITY_URL = "https://astanahub.com/ru/community/"
 LOGGER = logging.getLogger(__name__)
+
+
+def _localized_text(value: Any) -> str:
+    if isinstance(value, dict):
+        for language in ("ru", "kk", "en"):
+            text = str(value.get(language) or "").strip()
+            if text:
+                return text
+        return ""
+    return str(value or "").strip()
 
 
 def quest_kind(quest: dict[str, Any]) -> str | None:
@@ -58,6 +69,36 @@ def build_comment(title: str, paragraphs: list[str]) -> str | None:
         f"Важный тезис материала: {sentence.rstrip('.')}."
     )
     return comment[:450]
+
+
+def _post_paragraphs(page: Page, blog: dict[str, Any]) -> list[str]:
+    selectors = (
+        "article p",
+        ".blog-content p",
+        "main [class*='content'] p",
+        "main p",
+    )
+    seen: set[str] = set()
+    paragraphs: list[str] = []
+    for selector in selectors:
+        for value in page.locator(selector).all_inner_texts():
+            text = re.sub(r"\s+", " ", value).strip()
+            if text and text not in seen:
+                seen.add(text)
+                paragraphs.append(text)
+        if any(len(text) >= 45 for text in paragraphs):
+            return paragraphs
+
+    for key in ("description", "short_description", "annotation", "content", "text"):
+        value = _localized_text(blog.get(key))
+        if not value:
+            continue
+        value = unescape(re.sub(r"<[^>]+>", " ", value))
+        text = re.sub(r"\s+", " ", value).strip()
+        if text and text not in seen:
+            seen.add(text)
+            paragraphs.append(text)
+    return paragraphs
 
 
 def _api_get(page: Page, url: str) -> Any:
@@ -138,8 +179,10 @@ def _comment_blog(page: Page, blog: dict[str, Any], current_user_id: int) -> boo
     if _already_commented(page, blog_id, current_user_id):
         return False
 
-    paragraphs = page.locator(".blog-content p").all_inner_texts()
-    title = str((blog.get("title") or {}).get("ru") or "")
+    title = _localized_text(blog.get("title"))
+    if not title:
+        title = page.locator("h1").first.inner_text().strip()
+    paragraphs = _post_paragraphs(page, blog)
     comment = build_comment(title, paragraphs)
     if not comment:
         return False
@@ -184,7 +227,7 @@ def run_active_community_quests(page: Page) -> str:
     for quest in quests:
         quest_id = int(quest["id"])
         kind = quest_kind(quest)
-        title = str((quest.get("title") or {}).get("ru") or quest_id)
+        title = _localized_text(quest.get("title")) or str(quest_id)
         needed = _remaining(quest)
         LOGGER.info("Активный квест: %s; осталось действий: %s", title, needed)
 
