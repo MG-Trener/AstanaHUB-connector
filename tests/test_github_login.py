@@ -42,6 +42,66 @@ class MainTests(unittest.TestCase):
                     self.assertEqual(main.main(), 0)
                     run.assert_not_called()
 
+    def test_transient_browser_failure_retries_full_visit(self) -> None:
+        environment = {
+            "ASTANAHUB_EMAIL": "user@example.com",
+            "ASTANAHUB_PASSWORD": "secret",
+            "VISIT_MAX_ATTEMPTS": "2",
+            "VISIT_RETRY_DELAY_SECONDS": "1",
+        }
+        with patch("main.reward_due", return_value=True):
+            with patch.dict(os.environ, environment, clear=True):
+                with patch(
+                    "main.run_daily_visit",
+                    side_effect=[
+                        RuntimeError("modal blocked click"),
+                        ("ежедневная награда получена", "квестов нет"),
+                    ],
+                ) as run:
+                    with patch("main.time.sleep") as sleep:
+                        with patch("main.write_monthly_log") as write_log:
+                            self.assertEqual(main.main(), 0)
+
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(1)
+        write_log.assert_called_once_with("успешно", "получена", "квестов нет")
+
+    def test_unavailable_reward_is_retried_inside_same_run(self) -> None:
+        environment = {
+            "ASTANAHUB_EMAIL": "user@example.com",
+            "ASTANAHUB_PASSWORD": "secret",
+            "VISIT_MAX_ATTEMPTS": "2",
+            "VISIT_RETRY_DELAY_SECONDS": "1",
+        }
+        with patch("main.reward_due", return_value=True):
+            with patch.dict(os.environ, environment, clear=True):
+                with patch(
+                    "main.run_daily_visit",
+                    return_value=("награда уже получена или недоступна", None),
+                ) as run:
+                    with patch("main.time.sleep") as sleep:
+                        with patch("main.write_monthly_log") as write_log:
+                            self.assertEqual(main.main(), 0)
+
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(1)
+        write_log.assert_called_once_with("успешно", "не доступна", None)
+
+    def test_retry_does_not_cross_local_midnight(self) -> None:
+        zone = timezone(timedelta(hours=5))
+        self.assertTrue(
+            main._retry_stays_in_day(
+                datetime(2026, 10, 4, 23, 50, tzinfo=zone),
+                300,
+            )
+        )
+        self.assertFalse(
+            main._retry_stays_in_day(
+                datetime(2026, 10, 4, 23, 58, tzinfo=zone),
+                300,
+            )
+        )
+
     def test_reward_due_exactly_24_hours_after_last_claim(self) -> None:
         zone = timezone(timedelta(hours=5))
         claim_time = datetime(2026, 9, 16, 11, 43, 31, tzinfo=zone)

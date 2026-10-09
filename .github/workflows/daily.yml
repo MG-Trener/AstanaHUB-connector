@@ -30,7 +30,7 @@ permissions:
 jobs:
   visit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -69,6 +69,8 @@ jobs:
           ASTANAHUB_EMAIL: ${{ secrets.ASTANAHUB_EMAIL }}
           ASTANAHUB_PASSWORD: ${{ secrets.ASTANAHUB_PASSWORD }}
           FORCE_RUN: ${{ inputs.force }}
+          VISIT_MAX_ATTEMPTS: "6"
+          VISIT_RETRY_DELAY_SECONDS: "300"
         run: python main.py
 
       - name: Save monthly log

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from astanahub_connector.quests import run_active_community_quests
 
@@ -11,6 +11,7 @@ LOGIN_URL = "https://astanahub.com/ru/s/auth/login/"
 ACCOUNT_URL = "https://astanahub.com/account/v2/main/"
 API_BASE = "/s/auth/api/v1"
 LOGGER = logging.getLogger(__name__)
+REWARD_CLICK_ATTEMPTS = 3
 
 
 class AuthenticationError(RuntimeError):
@@ -72,20 +73,79 @@ def _login(page: Page, email: str, password: str) -> None:
     LOGGER.info("Вход по email выполнен")
 
 
+def _dismiss_blocking_modals(page: Page) -> None:
+    close_selectors = (
+        "button[x-show='isBanner']:visible",
+        "button[aria-label='Close']:visible",
+        "button[aria-label='Закрыть']:visible",
+        "button:visible:text-is('Закрыть')",
+        "button:visible:text-is('Пропустить')",
+        "button:visible:text-is('Не сейчас')",
+        "button:visible:text-is('Позже')",
+        "button:visible:text-is('×')",
+    )
+    for selector in close_selectors:
+        locator = page.locator(selector)
+        for index in range(min(locator.count(), 3)):
+            try:
+                locator.nth(index).click(timeout=3_000)
+                page.wait_for_timeout(300)
+            except PlaywrightTimeoutError:
+                continue
+
+    overlays = page.locator(
+        "div.absolute.inset-0.bg-black.bg-opacity-50.backdrop-blur-sm:visible"
+    )
+    for _ in range(min(overlays.count(), 5)):
+        overlay = overlays.first
+        try:
+            overlay.click(position={"x": 5, "y": 5}, timeout=3_000)
+            page.wait_for_timeout(500)
+        except PlaywrightTimeoutError:
+            break
+
+    if overlays.count():
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+
+
 def _claim_reward(page: Page) -> str:
-    welcome_close = page.locator("button[x-show='isBanner']:visible")
-    if welcome_close.count():
-        welcome_close.first.click()
+    last_error: Exception | None = None
+    clicked_once = False
+    for attempt in range(1, REWARD_CLICK_ATTEMPTS + 1):
+        _dismiss_blocking_modals(page)
 
-    reward = page.locator("button:visible", has_text="Получить награду").first
-    if not reward.count():
-        return "награда уже получена или недоступна"
+        reward = page.locator("button:visible", has_text="Получить награду").first
+        if not reward.count():
+            return (
+                "ежедневная награда получена"
+                if clicked_once
+                else "награда уже получена или недоступна"
+            )
 
-    reward.click()
-    page.wait_for_timeout(3000)
-    if page.locator("button:visible", has_text="Получить награду").count():
-        raise RuntimeError("Astana Hub оставил кнопку награды после нажатия")
-    return "ежедневная награда получена"
+        try:
+            reward.click(timeout=10_000)
+        except PlaywrightTimeoutError as exc:
+            last_error = exc
+            LOGGER.warning(
+                "Кнопку награды перекрывает интерфейс сайта; попытка %s/%s",
+                attempt,
+                REWARD_CLICK_ATTEMPTS,
+            )
+        else:
+            clicked_once = True
+            page.wait_for_timeout(3_000)
+            if not page.locator("button:visible", has_text="Получить награду").count():
+                return "ежедневная награда получена"
+            last_error = RuntimeError("Astana Hub оставил кнопку награды после нажатия")
+
+        if attempt < REWARD_CLICK_ATTEMPTS:
+            page.goto(ACCOUNT_URL, wait_until="domcontentloaded", timeout=120_000)
+            page.wait_for_timeout(2_000)
+
+    raise RuntimeError(
+        f"Не удалось нажать кнопку награды после {REWARD_CLICK_ATTEMPTS} попыток"
+    ) from last_error
 
 
 def run_daily_visit(

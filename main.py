@@ -3,12 +3,15 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 LOGS_DIR = Path("logs")
 LOCAL_TIMEZONE = timezone(timedelta(hours=5), name="UTC+5")
 REWARD_INTERVAL = timedelta(hours=24)
+DEFAULT_VISIT_ATTEMPTS = 6
+DEFAULT_RETRY_DELAY_SECONDS = 300
 
 
 def write_monthly_log(
@@ -90,6 +93,19 @@ def run_daily_visit(
     )
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _retry_stays_in_day(now: datetime, delay_seconds: int) -> bool:
+    retry_time = now + timedelta(seconds=delay_seconds)
+    return retry_time.date() == now.date()
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
@@ -114,20 +130,68 @@ def main() -> int:
         logging.error("Добавьте GitHub Secrets ASTANAHUB_EMAIL и ASTANAHUB_PASSWORD")
         return 2
 
-    try:
-        reward_result, quest_result = run_daily_visit(
-            email,
-            password,
-            claim_reward=True,
-            run_quests=True,
+    max_attempts = _positive_int_env("VISIT_MAX_ATTEMPTS", DEFAULT_VISIT_ATTEMPTS)
+    retry_delay = _positive_int_env(
+        "VISIT_RETRY_DELAY_SECONDS", DEFAULT_RETRY_DELAY_SECONDS
+    )
+    final_error: Exception | None = None
+    last_reward_result = "награда уже получена или недоступна"
+    last_quest_result: str | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            last_reward_result, last_quest_result = run_daily_visit(
+                email,
+                password,
+                claim_reward=True,
+                run_quests=True,
+            )
+            final_error = None
+            if last_reward_result == "ежедневная награда получена":
+                write_monthly_log(
+                    "успешно",
+                    reward_log_status(last_reward_result),
+                    last_quest_result,
+                )
+                logging.info(
+                    "Готово: %s; квесты: %s",
+                    last_reward_result,
+                    last_quest_result or "не запускались",
+                )
+                return 0
+        except Exception as exc:
+            final_error = exc
+            logging.warning(
+                "Попытка авторизации и получения награды %s/%s не удалась: %s",
+                attempt,
+                max_attempts,
+                exc,
+            )
+
+        now = datetime.now(LOCAL_TIMEZONE)
+        if attempt >= max_attempts or not _retry_stays_in_day(now, retry_delay):
+            break
+        logging.info(
+            "Повторная полная попытка через %s секунд; текущий день UTC+5 ещё не завершён",
+            retry_delay,
         )
-        write_monthly_log("успешно", reward_log_status(reward_result), quest_result)
-        logging.info("Готово: %s; квесты: %s", reward_result, quest_result or "не запускались")
-        return 0
-    except Exception as exc:
-        write_monthly_log("ошибка", "не проверена")
-        logging.error("Ежедневный вход не выполнен: %s", exc)
+        time.sleep(retry_delay)
+
+    if final_error is not None:
+        write_monthly_log("ошибка", "не проверена", last_quest_result)
+        logging.error("Все попытки ежедневного входа исчерпаны: %s", final_error)
         return 1
+
+    write_monthly_log(
+        "успешно",
+        reward_log_status(last_reward_result),
+        last_quest_result,
+    )
+    logging.warning(
+        "Награда не стала доступна после %s попыток в пределах текущего дня",
+        max_attempts,
+    )
+    return 0
 
 
 if __name__ == "__main__":
