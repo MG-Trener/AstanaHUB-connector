@@ -1,14 +1,79 @@
 from __future__ import annotations
 
+import hashlib
 import logging
-import re
-from html import unescape
 from typing import Any
 
 from playwright.sync_api import Page
 
 COMMUNITY_URL = "https://astanahub.com/ru/community/"
 LOGGER = logging.getLogger(__name__)
+APPROVAL_COMMENTS = (
+    "Отличный материал!",
+    "Спасибо, было полезно!",
+    "Интересный и полезный пост!",
+    "Хорошая подача материала!",
+    "Полезная публикация, спасибо!",
+    "Отлично раскрытая тема!",
+    "Спасибо за интересный пост!",
+    "Ценный материал!",
+    "Очень познавательно!",
+    "Хороший и содержательный пост!",
+    "Полезно, спасибо автору!",
+    "Интересная публикация!",
+    "Отличная работа!",
+    "Спасибо за полезный материал!",
+    "Тема раскрыта отлично!",
+    "Было интересно прочитать!",
+    "Содержательно и понятно!",
+    "Хороший обзор темы!",
+    "Отличный пост, спасибо!",
+    "Полезные мысли!",
+    "Действительно интересно!",
+    "Спасибо за хорошую публикацию!",
+    "Материал заслуживает внимания!",
+    "Информативно и доступно!",
+    "Очень полезный пост!",
+    "Прекрасная подача!",
+    "Спасибо за ценные мысли!",
+    "Интересный взгляд на тему!",
+    "Хорошо структурированный материал!",
+    "Познавательная публикация!",
+    "Отличное изложение!",
+    "Спасибо, прочитал с интересом!",
+    "Полезный и понятный материал!",
+    "Заслуживает внимания, спасибо!",
+    "Хорошая публикация!",
+    "Интересно и содержательно!",
+    "Спасибо за качественный пост!",
+    "Отличный разбор!",
+    "Полезная информация!",
+    "Материал получился отличным!",
+    "Спасибо за понятную подачу!",
+    "Интересные наблюдения!",
+    "Хорошо написано!",
+    "Отличная публикация!",
+    "Полезно и актуально!",
+    "Спасибо за содержательный материал!",
+    "Интересная тема!",
+    "Очень хорошая подача!",
+    "Материал действительно полезный!",
+    "Спасибо, было интересно!",
+    "Отличные мысли!",
+    "Хороший материал для размышления!",
+    "Полезный обзор!",
+    "Написано понятно и интересно!",
+    "Спасибо автору за публикацию!",
+    "Сильный материал!",
+    "Интересный разбор темы!",
+    "Отлично и по делу!",
+    "Полезная и ясная публикация!",
+    "Спасибо за актуальный материал!",
+    "Хорошая работа, спасибо!",
+    "Содержательный пост!",
+    "Отлично изложено!",
+    "Интересно было ознакомиться!",
+)
 
 
 def _localized_text(value: Any) -> str:
@@ -46,59 +111,12 @@ def quest_kind(quest: dict[str, Any]) -> str | None:
     return None
 
 
-def build_comment(title: str, paragraphs: list[str]) -> str | None:
-    clean_title = re.sub(r"\s+", " ", title).strip().strip(".!?")
-    candidates: list[str] = []
-    for paragraph in paragraphs:
-        text = re.sub(r"\s+", " ", paragraph).strip()
-        if 45 <= len(text) <= 700 and text.lower() != clean_title.lower():
-            candidates.append(text)
-    if not clean_title or not candidates:
-        return None
-
-    sentence = re.split(r"(?<=[.!?])\s+", candidates[0], maxsplit=1)[0].strip()
-    words = sentence.split()
-    if len(words) > 18:
-        sentence = " ".join(words[:18]).rstrip(",;:") + "…"
-    sentence = sentence[:220].strip()
-    if not sentence:
-        return None
-
-    comment = (
-        f"Интересный разбор темы «{clean_title}». "
-        f"Важный тезис материала: {sentence.rstrip('.')}."
-    )
-    return comment[:450]
-
-
-def _post_paragraphs(page: Page, blog: dict[str, Any]) -> list[str]:
-    selectors = (
-        "article p",
-        ".blog-content p",
-        "main [class*='content'] p",
-        "main p",
-    )
-    seen: set[str] = set()
-    paragraphs: list[str] = []
-    for selector in selectors:
-        for value in page.locator(selector).all_inner_texts():
-            text = re.sub(r"\s+", " ", value).strip()
-            if text and text not in seen:
-                seen.add(text)
-                paragraphs.append(text)
-        if any(len(text) >= 45 for text in paragraphs):
-            return paragraphs
-
-    for key in ("description", "short_description", "annotation", "content", "text"):
-        value = _localized_text(blog.get(key))
-        if not value:
-            continue
-        value = unescape(re.sub(r"<[^>]+>", " ", value))
-        text = re.sub(r"\s+", " ", value).strip()
-        if text and text not in seen:
-            seen.add(text)
-            paragraphs.append(text)
-    return paragraphs
+def approval_comment(blog_id: int, title: str = "") -> str:
+    digest = hashlib.blake2b(
+        f"{blog_id}:{title}".encode("utf-8"), digest_size=8
+    ).digest()
+    selector = int.from_bytes(digest, byteorder="big")
+    return APPROVAL_COMMENTS[selector % len(APPROVAL_COMMENTS)]
 
 
 def _api_get(page: Page, url: str) -> Any:
@@ -180,18 +198,18 @@ def _comment_blog(page: Page, blog: dict[str, Any], current_user_id: int) -> boo
         return False
 
     title = _localized_text(blog.get("title"))
-    if not title:
-        title = page.locator("h1").first.inner_text().strip()
-    paragraphs = _post_paragraphs(page, blog)
-    comment = build_comment(title, paragraphs)
-    if not comment:
-        return False
+    if not blog.get("reacted_up"):
+        _api_get(page, f"/api/blog/{blog_id}/reaction_up/")
+        blog["reacted_up"] = True
+        LOGGER.info("Поставлен лайк посту %s перед комментированием", blog_id)
+
+    comment = approval_comment(blog_id, title)
     _api_post(
         page,
         "/api/comment/",
         {"message": comment, "primary_key": str(blog_id), "source": "Blog"},
     )
-    LOGGER.info("Оставлен тематический комментарий к посту %s: %s", blog_id, title)
+    LOGGER.info("Оставлен короткий комментарий к посту %s: %s", blog_id, title)
     return True
 
 
@@ -228,7 +246,8 @@ def run_active_community_quests(page: Page) -> str:
         quest_id = int(quest["id"])
         kind = quest_kind(quest)
         title = _localized_text(quest.get("title")) or str(quest_id)
-        needed = _remaining(quest)
+        current_quest = _quest_progress(page, quest_id) or quest
+        needed = _remaining(current_quest)
         LOGGER.info("Активный квест: %s; осталось действий: %s", title, needed)
 
         try:
@@ -256,6 +275,7 @@ def run_active_community_quests(page: Page) -> str:
                     if blog.get("reacted_up"):
                         continue
                     _like_blog(page, blog)
+                    blog["reacted_up"] = True
                     needed -= 1
 
             elif kind == "comment":
