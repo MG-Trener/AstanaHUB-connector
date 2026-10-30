@@ -1,11 +1,13 @@
+import hashlib
 import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import main
+from astanahub_connector import github_login
 
 
 class MainTests(unittest.TestCase):
@@ -65,6 +67,25 @@ class MainTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         sleep.assert_called_once_with(1)
         write_log.assert_called_once_with("успешно", "получена", "квестов нет")
+
+    def test_non_retryable_access_block_stops_immediately(self) -> None:
+        environment = {
+            "ASTANAHUB_EMAIL": "user@example.com",
+            "ASTANAHUB_PASSWORD": "secret",
+            "VISIT_MAX_ATTEMPTS": "6",
+            "VISIT_RETRY_DELAY_SECONDS": "300",
+        }
+        error = github_login.AccessBlockedError("Cloudflare blocked runner")
+        with patch("main.reward_due", return_value=True):
+            with patch.dict(os.environ, environment, clear=True):
+                with patch("main.run_daily_visit", side_effect=error) as run:
+                    with patch("main.time.sleep") as sleep:
+                        with patch("main.write_monthly_log") as write_log:
+                            self.assertEqual(main.main(), 1)
+
+        run.assert_called_once()
+        sleep.assert_not_called()
+        write_log.assert_called_once_with("ошибка", "не проверена", None)
 
     def test_unavailable_reward_is_retried_inside_same_run(self) -> None:
         environment = {
@@ -133,6 +154,42 @@ class MainTests(unittest.TestCase):
     def test_no_successful_claim_means_due(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             self.assertTrue(main.reward_due(logs_dir=Path(directory)))
+
+
+class LoginProtocolTests(unittest.TestCase):
+    def test_payload_token_does_not_depend_on_page_md5(self) -> None:
+        timestamp = 1_700_000_000_123
+        expected_digest = hashlib.md5(
+            str(timestamp).encode("ascii"), usedforsecurity=False
+        ).hexdigest()
+        self.assertEqual(
+            github_login._payload_token(timestamp),
+            f"{timestamp}{expected_digest}W",
+        )
+
+    def test_api_request_passes_precomputed_payload_token(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {"ok": True, "status": 200, "body": {"ok": True}}
+        with patch(
+            "astanahub_connector.github_login._payload_token",
+            return_value="precomputed-token",
+        ):
+            result = github_login._api_request(page, "/auth/check/", {"value": "x"})
+
+        script, arguments = page.evaluate.call_args.args
+        self.assertNotIn("md5(", script)
+        self.assertEqual(arguments["payloadToken"], "precomputed-token")
+        self.assertEqual(result, {"ok": True})
+
+    def test_cloudflare_block_page_is_detected(self) -> None:
+        page = MagicMock()
+        page.title.return_value = "Attention Required! | Cloudflare"
+        page.locator.return_value.inner_text.return_value = (
+            "Sorry, you have been blocked. Cloudflare Ray ID: test"
+        )
+
+        with self.assertRaises(github_login.AccessBlockedError):
+            github_login._raise_if_access_blocked(page, 403)
 
     def test_monthly_log_uses_a_new_file_for_each_month(self) -> None:
         zone = timezone(timedelta(hours=5))

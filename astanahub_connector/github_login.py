@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import time
 from typing import Any
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -18,20 +20,51 @@ class AuthenticationError(RuntimeError):
     pass
 
 
-class OtpRequiredError(AuthenticationError):
+class NonRetryableVisitError(RuntimeError):
+    retryable = False
+
+
+class AccessBlockedError(NonRetryableVisitError):
     pass
+
+
+class OtpRequiredError(AuthenticationError, NonRetryableVisitError):
+    pass
+
+
+def _payload_token(timestamp_ms: int | None = None) -> str:
+    timestamp = timestamp_ms if timestamp_ms is not None else time.time_ns() // 1_000_000
+    digest = hashlib.md5(str(timestamp).encode("ascii"), usedforsecurity=False).hexdigest()
+    return f"{timestamp}{digest}W"
+
+
+def _raise_if_access_blocked(page: Page, status: int | None) -> None:
+    title = page.title()
+    body_text = page.locator("body").inner_text(timeout=5_000)
+    block_markers = (
+        "sorry, you have been blocked",
+        "attention required",
+        "cloudflare ray id",
+        "unable to access astanahub.com",
+    )
+    page_text = f"{title}\n{body_text}".lower()
+    if status in (403, 429) or any(marker in page_text for marker in block_markers):
+        status_text = f"HTTP {status}" if status is not None else "без HTTP-статуса"
+        raise AccessBlockedError(
+            "Cloudflare заблокировал адрес запуска при доступе к Astana Hub "
+            f"({status_text}); требуется разрешённый адрес запуска"
+        )
 
 
 def _api_request(page: Page, path: str, data: dict[str, Any]) -> dict[str, Any]:
     result = page.evaluate(
-        """async ({path, data}) => {
-            const timestamp = Date.now();
+        """async ({path, data, payloadToken}) => {
             const response = await fetch('/s/auth/api/v1' + path, {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'hub-payload-token': `${timestamp}${md5(timestamp)}W`
+                    'hub-payload-token': payloadToken
                 },
                 body: JSON.stringify(data)
             });
@@ -39,7 +72,7 @@ def _api_request(page: Page, path: str, data: dict[str, Any]) -> dict[str, Any]:
             try { body = await response.json(); } catch (_) {}
             return {ok: response.ok, status: response.status, body};
         }""",
-        {"path": path, "data": data},
+        {"path": path, "data": data, "payloadToken": _payload_token()},
     )
     if not result["ok"]:
         codes = result["body"].get("code", []) if isinstance(result["body"], dict) else []
@@ -56,7 +89,8 @@ def _api_request(page: Page, path: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _login(page: Page, email: str, password: str) -> None:
-    page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=120_000)
+    response = page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=120_000)
+    _raise_if_access_blocked(page, response.status if response else None)
     check = _api_request(page, "/auth/check/", {"value": email})
     if not check.get("user_exists"):
         raise AuthenticationError("Аккаунт с указанным email не найден")

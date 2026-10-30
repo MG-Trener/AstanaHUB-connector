@@ -167,6 +167,9 @@ def main() -> int:
                 max_attempts,
                 exc,
             )
+            if getattr(exc, "retryable", True) is False:
+                logging.error("Ошибка не исправится повтором в этом запуске")
+                break
 
         now = datetime.now(LOCAL_TIMEZONE)
         if attempt >= max_attempts or not _retry_stays_in_day(now, retry_delay):
