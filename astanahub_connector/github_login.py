@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from typing import Any
 
@@ -50,9 +51,11 @@ def _raise_if_access_blocked(page: Page, status: int | None) -> None:
     page_text = f"{title}\n{body_text}".lower()
     if status in (403, 429) or any(marker in page_text for marker in block_markers):
         status_text = f"HTTP {status}" if status is not None else "без HTTP-статуса"
+        ray_match = re.search(r"Cloudflare Ray ID:\s*([a-z0-9]+)", body_text, re.I)
+        ray_text = f", Ray ID {ray_match.group(1)}" if ray_match else ""
         raise AccessBlockedError(
             "Cloudflare заблокировал адрес запуска при доступе к Astana Hub "
-            f"({status_text}); требуется разрешённый адрес запуска"
+            f"({status_text}{ray_text}); требуется разрешённый адрес запуска"
         )
 
 

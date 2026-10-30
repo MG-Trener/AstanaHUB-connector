@@ -188,7 +188,10 @@ class LoginProtocolTests(unittest.TestCase):
             "Sorry, you have been blocked. Cloudflare Ray ID: test"
         )
 
-        with self.assertRaises(github_login.AccessBlockedError):
+        with self.assertRaisesRegex(
+            github_login.AccessBlockedError,
+            "Ray ID test",
+        ):
             github_login._raise_if_access_blocked(page, 403)
 
     def test_monthly_log_uses_a_new_file_for_each_month(self) -> None:
