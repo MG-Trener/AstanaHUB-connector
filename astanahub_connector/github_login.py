@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import time
 from typing import Any
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -23,15 +25,16 @@ class OtpRequiredError(AuthenticationError):
 
 
 def _api_request(page: Page, path: str, data: dict[str, Any]) -> dict[str, Any]:
+    timestamp = str(time.time_ns() // 1_000_000)
+    payload_token = f"{timestamp}{hashlib.md5(timestamp.encode('ascii')).hexdigest()}W"
     result = page.evaluate(
-        """async ({path, data}) => {
-            const timestamp = Date.now();
+        """async ({path, data, payloadToken}) => {
             const response = await fetch('/s/auth/api/v1' + path, {
                 method: 'POST',
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'hub-payload-token': `${timestamp}${md5(timestamp)}W`
+                    'hub-payload-token': payloadToken
                 },
                 body: JSON.stringify(data)
             });
@@ -39,7 +42,7 @@ def _api_request(page: Page, path: str, data: dict[str, Any]) -> dict[str, Any]:
             try { body = await response.json(); } catch (_) {}
             return {ok: response.ok, status: response.status, body};
         }""",
-        {"path": path, "data": data},
+        {"path": path, "data": data, "payloadToken": payload_token},
     )
     if not result["ok"]:
         codes = result["body"].get("code", []) if isinstance(result["body"], dict) else []
