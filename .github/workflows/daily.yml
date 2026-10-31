@@ -1,17 +1,18 @@
 name: Astana Hub daily reward
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/daily.yml"
-      - "main.py"
-      - "astanahub_connector/**"
-  schedule:
-    # Lightweight eligibility check every five minutes, offset from the top of the hour.
-    # Browser login starts only after 24 hours from the last successful reward claim.
-    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+  # Paused at owner's request on 2026-10-31. Restore these triggers to resume.
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - ".github/workflows/daily.yml"
+  #     - "main.py"
+  #     - "astanahub_connector/**"
+  # schedule:
+  #   # Lightweight eligibility check every five minutes, offset from the top of the hour.
+  #   # Browser login starts only after 24 hours from the last successful reward claim.
+  #   - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -29,6 +30,8 @@ permissions:
 
 jobs:
   visit:
+    # Safety stop while repository execution is paused, including manual dispatch.
+    if: ${{ false }}
     # Playwright 1.55 does not support the Ubuntu 26 image currently behind
     # ubuntu-latest. Pin the supported runner so Chromium can be installed.
     runs-on: ubuntu-24.04

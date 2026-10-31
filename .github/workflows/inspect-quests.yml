@@ -8,6 +8,8 @@ permissions:
 
 jobs:
   inspect:
+    # Paused at owner's request on 2026-10-31, including manual dispatch.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
